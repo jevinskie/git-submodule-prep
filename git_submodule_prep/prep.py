@@ -2,6 +2,7 @@
 
 import argparse
 import configparser
+import os
 import re
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ class Path(BasePath):
 
     @contextmanager
     def chdir_ctx(self):
-        orig_dir = Path().absolute()
+        orig_dir = Path().abspath()
         try:
             self.chdir()
             yield
@@ -85,7 +86,7 @@ def parse_submodules():
 def parse_prep(gitmodules_prep_path: Path) -> dict[str, dict[str, str]]:
     config = configparser.ConfigParser()
     config.read(gitmodules_prep_path)
-    return {sec: dict(config[sec]) for sec in config.sections()}
+    return {Path(submod): dict(config[submod]) for submod in config.sections()}
 
 
 def find_dir_containing(dir_path: Path, filename: Path) -> Path:
@@ -114,21 +115,22 @@ def find_prep_root(dir_path: Path) -> Path:
 
 
 def get_submodule_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
-    repo = git.Repo(repo_path)
-    submod_dirs = []
-    for submod in repo.submodules:
-        submod_dir = Path(submod.path)
-        submod_dirs.append(submod_dir)
-        if recurse:
-            submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
+    with repo_path.chdir_ctx():
+        repo = git.Repo()
+        submod_dirs = []
+        for submod in repo.submodules:
+            submod_dir = Path(submod.path)
+            submod_dirs.append(submod_dir)
+            if recurse:
+                submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
     return submod_dirs
 
 
 def get_subprep_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
     submod_dirs = get_submodule_dirs(repo_path, recurse=recurse)
     subprep_dirs = []
-    for submod_dir in submod_dirs:
-        if (submod_dir / ".gitmodules-prep").isfile():
+    for submod_dir in (repo_path, *submod_dirs):
+        if (submod_dir / ".gitmodules-prep").exists():
             subprep_dirs.append(submod_dir)
     return subprep_dirs
 
