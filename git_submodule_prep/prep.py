@@ -8,27 +8,32 @@ import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Callable
+from typing import Callable, Iterator
 
 import git
 from path import Path as BasePath
+from typing_extensions import Self
 
 
 class Path(BasePath):
-    def __new__(cls, other: str = "."):
+    def __new__(cls: type[Self], other: str = ".") -> Self:
         return BasePath.__new__(cls, other)
 
-    def __init__(self, other: str = "."):
+    def __init__(self, other: str = ".") -> None:
         super().__init__(other)
 
     @contextmanager
-    def chdir_ctx(self):
+    def chdir_ctx(self) -> Iterator[None]:
         orig_dir = Path().abspath()
         try:
             self.chdir()
             yield
         finally:
             orig_dir.chdir()
+
+    @property
+    def parent(self) -> Self:
+        return (self / "..").normpath()
 
 
 def run_cmd(*args, log: bool = True):
@@ -83,14 +88,13 @@ def parse_submodules():
         return submods
 
 
-def parse_prep(gitmodules_prep_path: Path) -> dict[str, dict[str, str]]:
+def parse_prep(gitmodules_prep_path: Path) -> dict[Path, dict[str, str]]:
     config = configparser.ConfigParser()
     config.read(gitmodules_prep_path)
     return {Path(submod): dict(config[submod]) for submod in config.sections()}
 
 
 def find_dir_containing(dir_path: Path, filename: Path) -> Path:
-    print(f"dir_path: '{str(dir_path)}'")
     assert dir_path.isdir()
     orig_path = dir_path
     cur_dir = dir_path
@@ -138,7 +142,7 @@ def get_subprep_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
 def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> list[Path]:
     subprep_dirs = set()
     for child in child_paths:
-        subprep_dirs |= set(get_subprep_dirs(child, recurse=recurse))
+        subprep_dirs |= set(get_subprep_dirs(find_prep_root(child), recurse=recurse))
     return list(subprep_dirs)
 
 
@@ -164,9 +168,13 @@ def real_main(args):
     if args.list_preps:
         print("Git repos with submodule preps:")
         for prep_root in get_unique_subprep_dirs(args.path, recurse=args.recursive):
-            print(f"submods: {get_submodule_dirs(prep_root, recurse=args.recursive)}")
             print(f"\t{prep_root}")
-            print(f"prep: {parse_prep(prep_root / '.gitmodules-prep')}")
+            prep_cfg = parse_prep(prep_root / ".gitmodules-prep")
+            for submod_path, submod in prep_cfg.items():
+                url, branch = submod["upstream_url"], submod["upstream_branch"]
+                print(f"\t\t{submod_path.normpath()}")
+                print(f"\t\t\tupstream_url:    {url}")
+                print(f"\t\t\tupstream_branch: {branch}")
     # for path in args.path:
     #     if args.list_preps:
     #         print("Git repos with submodule preps:")
