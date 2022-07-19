@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-import os
-import pathlib
+import configparser
 import re
 import shutil
 import subprocess
@@ -10,6 +9,7 @@ import sys
 from contextlib import contextmanager
 from typing import Callable
 
+import git
 import path
 
 
@@ -76,17 +76,33 @@ def parse_submodules():
         return submods
 
 
+def find_git_root(dir_path: Path) -> Path:
+    dir_path = dir_path.abspath()
+    orig_path = dir_path
+    assert dir_path.isdir()
+    while True:
+        git_dir = dir_path / ".git"
+        if git_dir.isdir():
+            return dir_path
+        if dir_path == Path("/"):
+            break
+        dir_path = dir_path.parent
+    raise ValueError(f'Couldn\'t find .git/ root for "{orig_path}"')
+
+
 def config_module(mod_path, upstream_url, upstream_branch):
-    with mod_path.chdir():
-        if any([l.startswith("upstream\t") for l in GIT("remote", "-v").out.splitlines()]):
-            return
-        GIT("remote", "add", "upstream", upstream_url)
-        GIT("fetch", "--all")
+    with mod_path.chdir_ctx():
+        # if any([l.startswith("upstream\t") for l in GIT("remote", "-v").out.splitlines()]):
+        #     return
+        # GIT("remote", "add", "upstream", upstream_url)
+        # GIT("fetch", "--all")
+        pass
 
 
 def fetch_module(mod_path):
-    with mod_path.chdir():
-        GIT("fetch", "--all")
+    with mod_path.chdir_ctx():
+        # GIT("fetch", "--all")
+        pass
 
 
 def real_main(args):
