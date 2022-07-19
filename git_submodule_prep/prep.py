@@ -113,19 +113,31 @@ def find_prep_root(dir_path: Path) -> Path:
     return prep_root
 
 
-def get_submodule_paths(repo_path: Path, recurse: bool = False) -> list[Path]:
+def get_submodule_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
     repo = git.Repo(repo_path)
-    submods = []
+    submod_dirs = []
     for submod in repo.submodules:
-        print(submod)
-        print(submod.path)
+        submod_dir = Path(submod.path)
+        submod_dirs.append(submod_dir)
+        if recurse:
+            submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
+    return submod_dirs
 
 
-def get_prep_roots(child_paths: list[Path], recurse: bool = False) -> list[Path]:
-    roots = set()
+def get_subprep_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
+    submod_dirs = get_submodule_dirs(repo_path, recurse=recurse)
+    subprep_dirs = []
+    for submod_dir in submod_dirs:
+        if (submod_dir / ".gitmodules-prep").isfile():
+            subprep_dirs.append(submod_dir)
+    return subprep_dirs
+
+
+def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> list[Path]:
+    subprep_dirs = set()
     for child in child_paths:
-        roots.add(find_prep_root(child))
-    return list(roots)
+        subprep_dirs |= set(get_subprep_dirs(child, recurse=recurse))
+    return list(subprep_dirs)
 
 
 def config_module(mod_path, upstream_url, upstream_branch):
@@ -149,8 +161,8 @@ def real_main(args):
 
     if args.list_preps:
         print("Git repos with submodule preps:")
-        for prep_root in get_prep_roots(args.path, recurse=args.recursive):
-            print(f"submods: {get_submodule_paths(prep_root)}")
+        for prep_root in get_unique_subprep_dirs(args.path, recurse=args.recursive):
+            print(f"submods: {get_submodule_dirs(prep_root, recurse=args.recursive)}")
             print(f"\t{prep_root}")
             print(f"prep: {parse_prep(prep_root / '.gitmodules-prep')}")
     # for path in args.path:
