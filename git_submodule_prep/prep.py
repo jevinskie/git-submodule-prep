@@ -2,12 +2,9 @@
 
 import argparse
 import configparser
-import os
-import re
-import shutil
-import subprocess
-import sys
+import operator
 from contextlib import contextmanager
+from functools import reduce
 from typing import Callable, Iterator
 
 import git
@@ -19,7 +16,7 @@ class Path(BasePath):
     def __new__(cls: type[Self], other: str = ".") -> Self:
         return BasePath.__new__(cls, other)
 
-    def __init__(self, other: str = ".") -> None:
+    def __init__(self, other: str = "."):
         super().__init__(other)
 
     @contextmanager
@@ -34,58 +31,6 @@ class Path(BasePath):
     @property
     def parent(self) -> Self:
         return (self / "..").normpath()
-
-
-def run_cmd(*args, log: bool = True):
-    args = (*args,)
-    if log:
-        print(f"+ {' '.join(map(str, args))}", file=sys.stderr)
-    r = subprocess.run(list(map(str, args)), capture_output=True)
-    if r.returncode != 0:
-        sys.stderr.buffer.write(r.stdout)
-        sys.stderr.buffer.write(r.stderr)
-        raise subprocess.CalledProcessError(r.returncode, args, r.stdout, r.stderr)
-    try:
-        r.out = r.stdout.decode()
-    except UnicodeDecodeError:
-        pass
-    return r
-
-
-def gen_cmd(bin_name: str) -> Callable[[str], subprocess.CompletedProcess]:
-    bin_path = shutil.which(bin_name)
-    assert bin_path is not None
-    return lambda *args, **kwargs: run_cmd(bin_path, *args, **kwargs)
-
-
-GIT = gen_cmd("git")
-
-SUBMOD_CONFIG_PAT = re.compile('\[submodule\s+"(.*?)"\]')
-SUBMOD_PATH_PAT = re.compile("\s+path\s+=\s(.*)")
-SUBMOD_URL_PAT = re.compile("\s+url\s+=\s(.*)")
-SUBMOD_BRANCH_PAT = re.compile("\s+branch\s+=\s(.*)")
-
-
-def parse_submodules():
-    with open(".gitmodules") as f:
-        submods = {}
-        current_mod = None
-        for line in f:
-            line = line.rstrip("\n")
-            cfg_match = SUBMOD_CONFIG_PAT.match(line)
-            if cfg_match:
-                current_mod = cfg_match.group(1)
-                submods[current_mod] = {}
-            path_match = SUBMOD_PATH_PAT.match(line)
-            if path_match:
-                submods[current_mod]["path"] = Path(path_match.group(1))
-            url_match = SUBMOD_URL_PAT.match(line)
-            if url_match:
-                submods[current_mod]["url"] = url_match.group(1)
-            branch_match = SUBMOD_BRANCH_PAT.match(line)
-            if branch_match:
-                submods[current_mod]["branch"] = branch_match.group(1)
-        return submods
 
 
 def parse_prep(gitmodules_prep_path: Path) -> dict[Path, dict[str, str]]:
@@ -143,11 +88,18 @@ def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> l
     subprep_dirs = set()
     for child in child_paths:
         subprep_dirs |= set(get_subprep_dirs(find_git_root(child), recurse=recurse))
-    return list(subprep_dirs)
+    subprep_dirs_dfs = sorted(subprep_dirs, key=lambda d: len(d.parts()), reverse=True)
+    return subprep_dirs_dfs
 
 
-def config_module(mod_path, upstream_url, upstream_branch):
+def config_module(mod_path: Path, upstream_url: str, upstream_branch: str):
     with mod_path.chdir_ctx():
+        repo = git.Repo()
+        if upstream_url not in reduce(
+            operator.__add__, [[u for u in r.urls] for r in repo.remotes], []
+        ):
+            print("upstream missing")
+            repo.create_remote("upstream", url=upstream_url, t=upstream_branch)
         # if any([l.startswith("upstream\t") for l in GIT("remote", "-v").out.splitlines()]):
         #     return
         # GIT("remote", "add", "upstream", upstream_url)
@@ -164,6 +116,8 @@ def fetch_module(mod_path):
 def real_main(args):
     if not len(args.path):
         args.path = [Path()]
+
+    prep_dirs = get_unique_subprep_dirs(args.path, recurse=args.recursive)
 
     if args.list_preps:
         print("Git repos with submodule preps:")
