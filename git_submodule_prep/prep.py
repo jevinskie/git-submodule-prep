@@ -77,13 +77,13 @@ def parse_submodules():
 
 
 def find_dir_containing(dir_path: Path, filename: Path) -> Path:
-    cur_dir = dir_path.abspath()
-    orig_path = dir_path
     assert dir_path.isdir()
+    orig_path = dir_path
+    cur_dir = dir_path
     while True:
         if (cur_dir / filename).exists():
             return cur_dir
-        if cur_dir == Path("/"):
+        if cur_dir.abspath() == Path("/"):
             break
         cur_dir = cur_dir.parent
     raise ValueError(f'Couldn\'t find "{filename}" under "{orig_path}"')
@@ -98,6 +98,13 @@ def find_prep_root(dir_path: Path) -> Path:
     if not (prep_root / ".git").exists():
         raise ValueError(f'Found .gitmodules-prep but not in a repo root at "{prep_root}"')
     return prep_root
+
+
+def get_prep_roots(child_paths: list[Path]) -> list[Path]:
+    roots = set()
+    for child in child_paths:
+        roots.add(find_prep_root(child))
+    return list(roots)
 
 
 def config_module(mod_path, upstream_url, upstream_branch):
@@ -116,16 +123,35 @@ def fetch_module(mod_path):
 
 
 def real_main(args):
+    if not len(args.path):
+        args.path = [Path()]
+
+    if args.list_preps:
+        print("Git repos with submodule preps:")
+        for prep_root in get_prep_roots(args.path):
+            print(f"\t{prep_root}")
+    # for path in args.path:
+    #     if args.list_preps:
+    #         print("Git repos with submodule preps:")
+    #         for prep_root in get_prep_roots(path)
+    #     elif args.unchanged:
+    #         print("unchanged")
+    #     elif args.merge:
+    #         print("merge")
     return
 
 
 def main():
     parser = argparse.ArgumentParser(description="git-submodule-prep")
-    parser.add_argument(
-        "-m", "--merge-upstream", action="store_true", help="Merge upstream changes with your own"
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument(
+        "-m", "--merge-upstream", action="store_true", help="merge upstream changes with your own"
     )
-    parser.add_argument("-l", "--list-preps", action="store_true", help="List submodule preps")
-    parser.add_argument("path", default=None, nargs="*", help="Repo path(s) (default: CWD)")
+    actions.add_argument(
+        "-u", "--unchanged", action="store_true", help="check if repos are unchanged"
+    )
+    actions.add_argument("-l", "--list-preps", action="store_true", help="list submodule preps")
+    parser.add_argument("path", type=Path, nargs="*", help="repo path(s) (default: CWD)")
     args = parser.parse_args()
     real_main(args)
 
