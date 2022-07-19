@@ -124,25 +124,25 @@ def get_submodule_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
         submod_dirs = []
         for submod in repo.submodules:
             submod_dir = Path(submod.path)
-            submod_dirs.append(submod_dir)
+            submod_dirs.append((repo_path / submod_dir).normpath())
             if recurse:
                 submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
     return submod_dirs
 
 
 def get_subprep_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
-    submod_dirs = get_submodule_dirs(repo_path, recurse=recurse)
+    submod_dirs = get_submodule_dirs(repo_path, recurse=True) if recurse else []
     subprep_dirs = []
     for submod_dir in (repo_path, *submod_dirs):
         if (submod_dir / ".gitmodules-prep").exists():
-            subprep_dirs.append(submod_dir)
+            subprep_dirs.append(submod_dir.normpath())
     return subprep_dirs
 
 
 def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> list[Path]:
     subprep_dirs = set()
     for child in child_paths:
-        subprep_dirs |= set(get_subprep_dirs(find_prep_root(child), recurse=recurse))
+        subprep_dirs |= set(get_subprep_dirs(find_git_root(child), recurse=recurse))
     return list(subprep_dirs)
 
 
