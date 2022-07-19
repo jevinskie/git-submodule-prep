@@ -82,6 +82,12 @@ def parse_submodules():
         return submods
 
 
+def parse_prep(gitmodules_prep_path: Path) -> dict[str, dict[str, str]]:
+    config = configparser.ConfigParser()
+    config.read(gitmodules_prep_path)
+    return {sec: dict(config[sec]) for sec in config.sections()}
+
+
 def find_dir_containing(dir_path: Path, filename: Path) -> Path:
     print(f"dir_path: '{str(dir_path)}'")
     assert dir_path.isdir()
@@ -107,7 +113,15 @@ def find_prep_root(dir_path: Path) -> Path:
     return prep_root
 
 
-def get_prep_roots(child_paths: list[Path]) -> list[Path]:
+def get_submodule_paths(repo_path: Path, recurse: bool = False) -> list[Path]:
+    repo = git.Repo(repo_path)
+    submods = []
+    for submod in repo.submodules:
+        print(submod)
+        print(submod.path)
+
+
+def get_prep_roots(child_paths: list[Path], recurse: bool = False) -> list[Path]:
     roots = set()
     for child in child_paths:
         roots.add(find_prep_root(child))
@@ -135,8 +149,10 @@ def real_main(args):
 
     if args.list_preps:
         print("Git repos with submodule preps:")
-        for prep_root in get_prep_roots(args.path):
+        for prep_root in get_prep_roots(args.path, recurse=args.recursive):
+            print(f"submods: {get_submodule_paths(prep_root)}")
             print(f"\t{prep_root}")
+            print(f"prep: {parse_prep(prep_root / '.gitmodules-prep')}")
     # for path in args.path:
     #     if args.list_preps:
     #         print("Git repos with submodule preps:")
