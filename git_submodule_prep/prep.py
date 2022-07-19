@@ -76,18 +76,28 @@ def parse_submodules():
         return submods
 
 
-def find_git_root(dir_path: Path) -> Path:
-    dir_path = dir_path.abspath()
+def find_dir_containing(dir_path: Path, filename: Path) -> Path:
+    cur_dir = dir_path.abspath()
     orig_path = dir_path
     assert dir_path.isdir()
     while True:
-        git_dir = dir_path / ".git"
-        if git_dir.isdir():
-            return dir_path
-        if dir_path == Path("/"):
+        if (cur_dir / filename).exists():
+            return cur_dir
+        if cur_dir == Path("/"):
             break
-        dir_path = dir_path.parent
-    raise ValueError(f'Couldn\'t find .git/ root for "{orig_path}"')
+        cur_dir = cur_dir.parent
+    raise ValueError(f'Couldn\'t find "{filename}" under "{orig_path}"')
+
+
+def find_git_root(dir_path: Path) -> Path:
+    return find_dir_containing(dir_path, Path(".git"))
+
+
+def find_prep_root(dir_path: Path) -> Path:
+    prep_root = find_dir_containing(dir_path, Path(".gitmodules-prep"))
+    if not (prep_root / ".git").exists():
+        raise ValueError(f'Found .gitmodules-prep but not in a repo root at "{prep_root}"')
+    return prep_root
 
 
 def config_module(mod_path, upstream_url, upstream_branch):
