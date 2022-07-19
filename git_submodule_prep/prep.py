@@ -10,10 +10,16 @@ from contextlib import contextmanager
 from typing import Callable
 
 import git
-import path
+from path import Path as BasePath
 
 
-class Path(path.Path):
+class Path(BasePath):
+    def __new__(cls, other: str = "."):
+        return BasePath.__new__(cls, other)
+
+    def __init__(self, other: str = "."):
+        super().__init__(other)
+
     @contextmanager
     def chdir_ctx(self):
         orig_dir = Path().absolute()
@@ -77,6 +83,7 @@ def parse_submodules():
 
 
 def find_dir_containing(dir_path: Path, filename: Path) -> Path:
+    print(f"dir_path: '{str(dir_path)}'")
     assert dir_path.isdir()
     orig_path = dir_path
     cur_dir = dir_path
@@ -151,6 +158,7 @@ def main():
         "-u", "--unchanged", action="store_true", help="check if repos are unchanged"
     )
     actions.add_argument("-l", "--list-preps", action="store_true", help="list submodule preps")
+    parser.add_argument("-r", "--recursive", action="store_true", help="recurse into sub-preps")
     parser.add_argument("path", type=Path, nargs="*", help="repo path(s) (default: CWD)")
     args = parser.parse_args()
     real_main(args)
