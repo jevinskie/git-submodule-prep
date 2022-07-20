@@ -109,8 +109,6 @@ def get_dirty_repos(repo_dirs: list[Path]) -> list[Path]:
 def repo_needs_merge(repo_path: Path, branch: str, upstream_branch: str) -> bool:
     with repo_path.chdir_ctx():
         repo = git.Repo()
-        print(f"repo_path: {repo_path}")
-        print(f"repo.branches: {repo.branches}")
         branch_head = repo.branches[branch]
         upstream_branch_head = repo.branches[upstream_branch]
         return not repo.is_ancestor(upstream_branch_head, branch_head)
@@ -134,7 +132,6 @@ def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
                 assert submod.branch_path.startswith("refs/heads/")
                 branch = submod.branch_path.removeprefix("refs/heads/")
                 submod_dir = Path(submod.path)
-                print(f"prep_dir: {prep_dir} submod_dir: {submod_dir} branch: {branch}")
                 submod_branches[Path(submod.path)] = branch
 
         prep_cfg = parse_prep(prep_dir / ".gitmodules-prep")
@@ -218,6 +215,11 @@ def real_main(args):
         print("Repos that need merging:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}")
+    elif args.fetch:
+        print("Fetching:")
+        for repo_dir in set(*map(lambda d: get_submodule_dirs(d, args.recursive), args.path)):
+            print(f"\t{repo_dir}")
+            fetch_repo(repo_dir)
     elif args.merge_upstream:
         print("Merging from upstream:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
@@ -232,6 +234,7 @@ def real_main(args):
 def get_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="git-submodule-prep")
     actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument("-f", "--fetch", action="store_true", help="fetch from all origins")
     actions.add_argument(
         "-m", "--merge-upstream", action="store_true", help="merge upstream changes with your own"
     )
