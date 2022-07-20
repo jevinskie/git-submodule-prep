@@ -163,8 +163,8 @@ def config_module(mod_path: Path, prep_cfg: dict):
             upstream_branch.set_tracking_branch(upstream_remote_branch)
 
 
-def fetch_module(mod_path: Path):
-    with mod_path.chdir_ctx():
+def fetch_repo(repo_path: Path):
+    with repo_path.chdir_ctx():
         repo = git.Repo()
         for remote in repo.remotes:
             remote.fetch()
@@ -178,9 +178,12 @@ def do_merge(repo_dir: Path, prep_cfg: dict) -> bool:
         my_branch = repo.branches[branch_name]
         upstream_branch = repo.branches[upstream_branch_name]
         my_branch.checkout()
-        merge_base = repo.merge_base(my_branch, upstream_branch)
-        idx = repo.index.merge_tree(upstream_branch, merge_base)
-        if len(idx.unmerged_blobs()):
+        try:
+            repo.git.merge("--no-commit", upstream_branch_name)
+        except git.GitCommandError as e:
+            print(e)
+            return False
+        if len(repo.index.unmerged_blobs()):
             return False
         repo.index.commit(
             f"Merge {upstream_branch_name} into {branch_name}",
@@ -215,8 +218,8 @@ def real_main(args):
         print("Repos that need merging:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}")
-    elif args.merge:
-        print("Merging:")
+    elif args.merge_upstream:
+        print("Merging from upstream:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}", end="")
             merged = do_merge(needs_merge_dir, prep_cfg)
