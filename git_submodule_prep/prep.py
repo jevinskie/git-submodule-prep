@@ -99,10 +99,7 @@ def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> l
 def is_dirty(repo_path: Path) -> bool:
     with repo_path.chdir_ctx():
         repo = git.Repo()
-        untracked = bool(len(repo.untracked_files))
-        unstaged = bool(len(repo.index.diff(None, ignore_submodules="all")))
-        staged = bool(len(repo.index.diff(repo.head.commit, ignore_submodules="all")))
-        return untracked or unstaged or staged
+        return repo.is_dirty(submodules=False)
 
 
 def get_dirty_repos(repo_dirs: list[Path]) -> list[Path]:
@@ -116,7 +113,7 @@ def repo_needs_merge(repo_path: Path, branch: str, upstream_branch: str) -> bool
         print(f"repo.branches: {repo.branches}")
         branch_head = repo.branches[branch]
         upstream_branch_head = repo.branches[upstream_branch]
-        return len(branch_head.commit.diff(upstream_branch_head.commit)) == 0
+        return not repo.is_ancestor(upstream_branch_head, branch_head)
 
 
 def get_repos_needing_merge(prep_cfgs: dict) -> list[Path]:
@@ -173,10 +170,23 @@ def fetch_module(mod_path: Path):
             remote.fetch()
 
 
-def checkout_branch(repo_dir: Path):
+def do_merge(repo_dir: Path, prep_cfg: dict) -> bool:
+    branch_name = prep_cfg["branch"]
+    upstream_branch_name = prep_cfg["upstream_branch"]
     with repo_dir.chdir_ctx():
         repo = git.Repo()
-        # repo.
+        my_branch = repo.branches[branch_name]
+        upstream_branch = repo.branches[upstream_branch_name]
+        my_branch.checkout()
+        merge_base = repo.merge_base(my_branch, upstream_branch)
+        idx = repo.index.merge_tree(upstream_branch, merge_base)
+        if len(idx.unmerged_blobs()):
+            return False
+        repo.index.commit(
+            f"Merge {upstream_branch_name} into {branch_name}",
+            parent_commits=(my_branch.commit, upstream_branch.commit),
+        )
+        return True
 
 
 def real_main(args):
@@ -185,11 +195,9 @@ def real_main(args):
 
     prep_dirs = get_unique_subprep_dirs(args.path, recurse=args.recursive)
     prep_cfgs = get_prep_configs(prep_dirs)
-    print(prep_cfgs)
 
     for prep_dir, prep_cfg in prep_cfgs.items():
         config_module(prep_dir, prep_cfg)
-        # fetch_module(prep_dir)
 
     if args.list_preps:
         print("Git repos with submodule preps:")
@@ -208,7 +216,14 @@ def real_main(args):
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}")
     elif args.merge:
-        raise NotImplementedError("merging")
+        print("Merging:")
+        for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
+            print(f"\t{needs_merge_dir}", end="")
+            merged = do_merge(needs_merge_dir, prep_cfg)
+            if merged:
+                print(" [merged]")
+            else:
+                print(" [UNMERGED]")
 
 
 def get_arg_parser() -> argparse.ArgumentParser:
