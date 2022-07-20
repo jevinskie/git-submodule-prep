@@ -100,7 +100,6 @@ def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> l
 def is_dirty(repo_path: Path) -> bool:
     with repo_path.chdir_ctx():
         repo = git.Repo()
-        repo = git.Repo(repo_path)
         untracked = bool(len(repo.untracked_files))
         unstaged = bool(len(repo.index.diff(None)))
         staged = bool(len(repo.index.diff(repo.head.commit)))
@@ -158,7 +157,7 @@ def real_main(args):
             print(f"\t\t\tupstream_branch: {prep_cfg['upstream_branch']}")
     elif args.dirty:
         for dirty_dir in get_dirty_preps(args.path, recurse=args.recursive):
-            pass
+            print(dirty_dir)
 
     # for path in args.path:
     #     if args.list_preps:
