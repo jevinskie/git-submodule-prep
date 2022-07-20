@@ -3,7 +3,7 @@
 import argparse
 import configparser
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 import git
 from path import Path as BasePath
@@ -79,6 +79,14 @@ def get_submodule_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
     return submod_dirs
 
 
+def get_unique_submodule_dirs(child_paths: list[Path], recurse: bool = False) -> list[Path]:
+    submod_dirs = set()
+    for child in child_paths:
+        submod_dirs |= set(get_submodule_dirs(find_git_root(child), recurse=recurse))
+    submod_dirs = sorted(submod_dirs, key=lambda d: len(d.parts()), reverse=True)
+    return submod_dirs
+
+
 def get_subprep_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
     submod_dirs = get_submodule_dirs(repo_path, recurse=True) if recurse else []
     subprep_dirs = []
@@ -131,7 +139,6 @@ def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
             for submod in repo.submodules:
                 assert submod.branch_path.startswith("refs/heads/")
                 branch = submod.branch_path.removeprefix("refs/heads/")
-                submod_dir = Path(submod.path)
                 submod_branches[Path(submod.path)] = branch
 
         prep_cfg = parse_prep(prep_dir / ".gitmodules-prep")
@@ -160,18 +167,37 @@ def config_module(mod_path: Path, prep_cfg: dict):
             upstream_branch.set_tracking_branch(upstream_remote_branch)
 
 
-def fetch_repo(repo_path: Path):
-    with repo_path.chdir_ctx():
+def fetch_repo(repo_dir: Path):
+    with repo_dir.chdir_ctx():
         repo = git.Repo()
         for remote in repo.remotes:
             remote.fetch()
 
 
-def do_merge(repo_dir: Path, prep_cfg: dict) -> bool:
-    branch_name = prep_cfg["branch"]
-    upstream_branch_name = prep_cfg["upstream_branch"]
+def push_repo(repo_dir: Path, prep_cfg: Optional[dict] = None):
     with repo_dir.chdir_ctx():
         repo = git.Repo()
+        if prep_cfg:
+            branch_name = prep_cfg["branch"]
+            upstream_branch_name = prep_cfg["upstream_branch"]
+        else:
+            branch_name = repo.active_branch.name
+            upstream_branch_name = None
+        print(f"branch: {branch_name} upstream_branch: {upstream_branch_name}")
+        repo.remotes["origin"].push(branch_name)
+        if upstream_branch_name:
+            repo.remotes["origin"].push(upstream_branch_name)
+
+
+def merge_repo(repo_dir: Path, prep_cfg: Optional[dict] = None) -> bool:
+    with repo_dir.chdir_ctx():
+        repo = git.Repo()
+        if prep_cfg:
+            branch_name = prep_cfg["branch"]
+            upstream_branch_name = prep_cfg["upstream_branch"]
+        else:
+            branch_name = repo.active_branch.name
+            upstream_branch_name = repo.active_branch.remote_name
         my_branch = repo.branches[branch_name]
         upstream_branch = repo.branches[upstream_branch_name]
         my_branch.checkout()
@@ -217,14 +243,19 @@ def real_main(args):
             print(f"\t{needs_merge_dir}")
     elif args.fetch:
         print("Fetching:")
-        for repo_dir in set(*map(lambda d: get_submodule_dirs(d, args.recursive), args.path)):
+        for repo_dir in get_unique_submodule_dirs(args.path, args.recursive):
             print(f"\t{repo_dir}")
             fetch_repo(repo_dir)
+    elif args.push:
+        print("Pushing:")
+        for repo_dir in get_unique_submodule_dirs(args.path, args.recursive):
+            print(f"\t{repo_dir}")
+            push_repo(repo_dir, prep_cfgs.get(repo_dir, None))
     elif args.merge_upstream:
         print("Merging from upstream:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}", end="")
-            merged = do_merge(needs_merge_dir, prep_cfg)
+            merged = merge_repo(needs_merge_dir, prep_cfg.get(repo_dir, None))
             if merged:
                 print(" [merged]")
             else:
@@ -234,7 +265,8 @@ def real_main(args):
 def get_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="git-submodule-prep")
     actions = parser.add_mutually_exclusive_group(required=True)
-    actions.add_argument("-f", "--fetch", action="store_true", help="fetch from all origins")
+    actions.add_argument("-f", "--fetch", action="store_true", help="fetch from all remotes")
+    actions.add_argument("-p", "--push", action="store_true", help="push all branches to origin")
     actions.add_argument(
         "-m", "--merge-upstream", action="store_true", help="merge upstream changes with your own"
     )
