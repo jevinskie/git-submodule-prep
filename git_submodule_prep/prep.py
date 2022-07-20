@@ -2,10 +2,9 @@
 
 import argparse
 import configparser
-import operator
+import sys
 from contextlib import contextmanager
-from functools import reduce
-from typing import Callable, Iterator
+from typing import Iterator
 
 import git
 from path import Path as BasePath
@@ -31,6 +30,12 @@ class Path(BasePath):
     @property
     def parent(self) -> Self:
         return (self / "..").normpath()
+
+    def removesuffix(self, suffix: Self) -> Self:
+        return Path(super().removesuffix(suffix)).normpath()
+
+    def removeprefix(self, prefix: Self) -> Self:
+        return Path(super().removeprefix(prefix)).normpath()
 
 
 def parse_prep(gitmodules_prep_path: Path) -> dict[Path, dict[str, str]]:
@@ -92,25 +97,48 @@ def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> l
     return subprep_dirs_dfs
 
 
+def is_dirty(repo_path: Path) -> bool:
+    with repo_path.chdir_ctx():
+        repo = git.Repo()
+        repo = git.Repo(repo_path)
+        untracked = bool(len(repo.untracked_files))
+        unstaged = bool(len(repo.index.diff(None)))
+        staged = bool(len(repo.index.diff(repo.head.commit)))
+        return untracked or unstaged or staged
+
+
+def get_dirty_preps(child_paths: list[Path], recurse: bool = False) -> list[Path]:
+    dirty = []
+    for prep_dir in get_unique_subprep_dirs(child_paths, recurse=recurse):
+        if is_dirty(prep_dir):
+            dirty.append(prep_dir)
+    return dirty
+
+
+def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
+    cfgs = {}
+    for prep_dir in prep_dirs:
+        prep_cfg = parse_prep(prep_dir / ".gitmodules-prep")
+        for path, cfg in prep_cfg.items():
+            cfg["path"] = path
+            cfgs[(prep_dir / path).normpath()] = cfg
+    return cfgs
+
+
 def config_module(mod_path: Path, upstream_url: str, upstream_branch: str):
     with mod_path.chdir_ctx():
         repo = git.Repo()
-        if upstream_url not in reduce(
-            operator.__add__, [[u for u in r.urls] for r in repo.remotes], []
-        ):
-            print("upstream missing")
+        if "upstream" not in repo.remotes:
             repo.create_remote("upstream", url=upstream_url, t=upstream_branch)
-        # if any([l.startswith("upstream\t") for l in GIT("remote", "-v").out.splitlines()]):
-        #     return
-        # GIT("remote", "add", "upstream", upstream_url)
-        # GIT("fetch", "--all")
-        pass
+            upstream = repo.remotes["upstream"]
+            upstream.fetch()
 
 
-def fetch_module(mod_path):
+def fetch_module(mod_path: Path):
     with mod_path.chdir_ctx():
-        # GIT("fetch", "--all")
-        pass
+        repo = git.Repo()
+        for remote in repo.remotes:
+            remote.fetch()
 
 
 def real_main(args):
@@ -118,17 +146,20 @@ def real_main(args):
         args.path = [Path()]
 
     prep_dirs = get_unique_subprep_dirs(args.path, recurse=args.recursive)
+    prep_cfgs = get_prep_configs(prep_dirs)
 
     if args.list_preps:
         print("Git repos with submodule preps:")
-        for prep_root in get_unique_subprep_dirs(args.path, recurse=args.recursive):
-            print(f"\t{prep_root}")
-            prep_cfg = parse_prep(prep_root / ".gitmodules-prep")
-            for submod_path, submod in prep_cfg.items():
-                url, branch = submod["upstream_url"], submod["upstream_branch"]
-                print(f"\t\t{submod_path.normpath()}")
-                print(f"\t\t\tupstream_url:    {url}")
-                print(f"\t\t\tupstream_branch: {branch}")
+        for prep_dir, prep_cfg in prep_cfgs.items():
+            prep_git_dir = prep_dir.removesuffix(prep_cfg["path"])
+            print(f"\t{prep_git_dir}")
+            print(f"\t\t{prep_cfg['path'].normpath()}")
+            print(f"\t\t\tupstream_url:    {prep_cfg['upstream_url']}")
+            print(f"\t\t\tupstream_branch: {prep_cfg['upstream_branch']}")
+    elif args.dirty:
+        for dirty_dir in get_dirty_preps(args.path, recurse=args.recursive):
+            pass
+
     # for path in args.path:
     #     if args.list_preps:
     #         print("Git repos with submodule preps:")
@@ -146,9 +177,7 @@ def main():
     actions.add_argument(
         "-m", "--merge-upstream", action="store_true", help="merge upstream changes with your own"
     )
-    actions.add_argument(
-        "-u", "--unchanged", action="store_true", help="check if repos are unchanged"
-    )
+    actions.add_argument("-d", "--dirty", action="store_true", help="check if repos are dirty")
     actions.add_argument("-l", "--list-preps", action="store_true", help="list submodule preps")
     parser.add_argument("-r", "--recursive", action="store_true", help="recurse into sub-preps")
     parser.add_argument("path", type=Path, nargs="*", help="repo path(s) (default: CWD)")
