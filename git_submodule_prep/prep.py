@@ -101,16 +101,16 @@ def is_dirty(repo_path: Path) -> bool:
     with repo_path.chdir_ctx():
         repo = git.Repo()
         untracked = bool(len(repo.untracked_files))
-        unstaged = bool(len(repo.index.diff(None)))
-        staged = bool(len(repo.index.diff(repo.head.commit)))
+        unstaged = bool(len(repo.index.diff(None, ignore_submodules="all")))
+        staged = bool(len(repo.index.diff(repo.head.commit, ignore_submodules="all")))
         return untracked or unstaged or staged
 
 
-def get_dirty_preps(child_paths: list[Path], recurse: bool = False) -> list[Path]:
+def get_dirty_repos(repo_dirs: list[Path]) -> list[Path]:
     dirty = []
-    for prep_dir in get_unique_subprep_dirs(child_paths, recurse=recurse):
-        if is_dirty(prep_dir):
-            dirty.append(prep_dir)
+    for repo_dir in repo_dirs:
+        if is_dirty(repo_dir):
+            dirty.append(repo_dir)
     return dirty
 
 
@@ -156,17 +156,10 @@ def real_main(args):
             print(f"\t\t\tupstream_url:    {prep_cfg['upstream_url']}")
             print(f"\t\t\tupstream_branch: {prep_cfg['upstream_branch']}")
     elif args.dirty:
-        for dirty_dir in get_dirty_preps(args.path, recurse=args.recursive):
-            print(dirty_dir)
+        print("Dirty repos:")
+        for dirty_dir in get_dirty_repos(prep_cfgs.keys()):
+            print(f"\t{dirty_dir}")
 
-    # for path in args.path:
-    #     if args.list_preps:
-    #         print("Git repos with submodule preps:")
-    #         for prep_root in get_prep_roots(path)
-    #     elif args.unchanged:
-    #         print("unchanged")
-    #     elif args.merge:
-    #         print("merge")
     return
 
 
