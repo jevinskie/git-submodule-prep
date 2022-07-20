@@ -2,12 +2,15 @@
 
 import argparse
 import configparser
+import logging
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
 import git
 from path import Path as BasePath
 from typing_extensions import Self
+
+logging.basicConfig(level=logging.INFO)
 
 
 class Path(BasePath):
@@ -157,15 +160,29 @@ def config_module(mod_path: Path, prep_cfg: dict):
     upstream_branch_name = prep_cfg["upstream_branch"]
     repo = git.Repo(mod_path)
     if "upstream" not in repo.remotes:
-        repo.create_remote("upstream", url=prep_cfg["upstream_url"], t=upstream_branch_name)
-    if branch_name not in repo.branches:
-        my_remote_branch = repo.refs["origin/" + branch_name]
-        my_branch = repo.create_head(branch_name, my_remote_branch)
-        my_branch.set_tracking_branch(my_remote_branch)
+        new_remote = repo.create_remote(
+            "upstream", url=prep_cfg["upstream_url"], t=upstream_branch_name
+        )
+        new_remote.fetch()
+    try:
+        current_branch = repo.active_branch
+    except TypeError:
+        current_branch = None
+    switch_branch = False
     if upstream_branch_name not in repo.branches:
         upstream_remote_branch = repo.refs["upstream/" + upstream_branch_name]
         upstream_branch = repo.create_head(upstream_branch_name, upstream_remote_branch)
         upstream_branch.set_tracking_branch(upstream_remote_branch)
+        upstream_branch.checkout()
+        switch_branch = True
+    if branch_name not in repo.branches:
+        my_remote_branch = repo.refs["origin/" + branch_name]
+        my_branch = repo.create_head(branch_name, my_remote_branch)
+        my_branch.set_tracking_branch(my_remote_branch)
+        my_branch.checkout()
+        switch_branch = True
+    if switch_branch and current_branch:
+        current_branch.checkout()
 
 
 def fetch_repo(repo_dir: Path):
@@ -206,7 +223,7 @@ def merge_repo(repo_dir: Path, prep_cfg: Optional[dict] = None) -> bool:
     try:
         repo.git.merge("--no-commit", upstream_branch_name)
     except git.GitCommandError as e:
-        print("\n" + e)
+        print(f"\n{e}\n")
         return False
     if len(repo.index.unmerged_blobs()):
         return False
@@ -265,12 +282,12 @@ def real_main(args):
     elif args.merge_upstream:
         print("Merging from upstream:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
-            print(f"\t{needs_merge_dir}", end="")
-            merged = merge_repo(needs_merge_dir, prep_cfg.get(needs_merge_dir, None))
+            print(f"\t{needs_merge_dir} ", end="")
+            merged = merge_repo(needs_merge_dir, prep_cfgs.get(needs_merge_dir, None))
             if merged:
-                print(" [merged]")
+                print("[merged]")
             else:
-                print(" [UNMERGED]")
+                print("[UNMERGED]")
 
 
 def get_arg_parser() -> argparse.ArgumentParser:
