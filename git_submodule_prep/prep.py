@@ -68,21 +68,26 @@ def find_prep_root(dir_path: Path) -> Path:
 
 
 def get_submodule_dirs(repo_path: Path, recurse: bool = False) -> list[Path]:
-    with repo_path.chdir_ctx():
-        repo = git.Repo()
-        submod_dirs = []
-        for submod in repo.submodules:
-            submod_dir = Path(submod.path)
-            submod_dirs.append((repo_path / submod_dir).normpath())
-            if recurse:
-                submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
+    repo = git.Repo(repo_path)
+    submod_dirs = []
+    for submod in repo.submodules:
+        submod_dir = Path(submod.path)
+        submod_dir = (repo_path / submod_dir).normpath()
+        submod_dirs.append(submod_dir)
+        if recurse:
+            submod_dirs += get_submodule_dirs(submod_dir, recurse=True)
     return submod_dirs
 
 
-def get_unique_submodule_dirs(child_paths: list[Path], recurse: bool = False) -> list[Path]:
+def get_unique_repo_dirs(
+    child_paths: list[Path], recurse: bool = False, include_root: bool = False
+) -> list[Path]:
     submod_dirs = set()
     for child in child_paths:
-        submod_dirs |= set(get_submodule_dirs(find_git_root(child), recurse=recurse))
+        git_root = find_git_root(child)
+        if include_root:
+            submod_dirs.add(git_root)
+        submod_dirs |= set(get_submodule_dirs(git_root, recurse=recurse))
     submod_dirs = sorted(submod_dirs, key=lambda d: len(d.parts()), reverse=True)
     return submod_dirs
 
@@ -105,9 +110,8 @@ def get_unique_subprep_dirs(child_paths: list[Path], recurse: bool = False) -> l
 
 
 def is_dirty(repo_path: Path) -> bool:
-    with repo_path.chdir_ctx():
-        repo = git.Repo()
-        return repo.is_dirty(submodules=False)
+    repo = git.Repo(repo_path)
+    return repo.is_dirty(submodules=False)
 
 
 def get_dirty_repos(repo_dirs: list[Path]) -> list[Path]:
@@ -115,11 +119,10 @@ def get_dirty_repos(repo_dirs: list[Path]) -> list[Path]:
 
 
 def repo_needs_merge(repo_path: Path, branch: str, upstream_branch: str) -> bool:
-    with repo_path.chdir_ctx():
-        repo = git.Repo()
-        branch_head = repo.branches[branch]
-        upstream_branch_head = repo.branches[upstream_branch]
-        return not repo.is_ancestor(upstream_branch_head, branch_head)
+    repo = git.Repo(repo_path)
+    branch_head = repo.branches[branch]
+    upstream_branch_head = repo.branches[upstream_branch]
+    return not repo.is_ancestor(upstream_branch_head, branch_head)
 
 
 def get_repos_needing_merge(prep_cfgs: dict) -> list[Path]:
@@ -134,12 +137,11 @@ def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
     cfgs = {}
     for prep_dir in prep_dirs:
         submod_branches = {}
-        with prep_dir.chdir_ctx():
-            repo = git.Repo()
-            for submod in repo.submodules:
-                assert submod.branch_path.startswith("refs/heads/")
-                branch = submod.branch_path.removeprefix("refs/heads/")
-                submod_branches[Path(submod.path)] = branch
+        repo = git.Repo(prep_dir)
+        for submod in repo.submodules:
+            assert submod.branch_path.startswith("refs/heads/")
+            branch = submod.branch_path.removeprefix("refs/heads/")
+            submod_branches[Path(submod.path)] = branch
 
         prep_cfg = parse_prep(prep_dir / ".gitmodules-prep")
         for path, cfg in prep_cfg.items():
@@ -153,66 +155,66 @@ def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
 def config_module(mod_path: Path, prep_cfg: dict):
     branch_name = prep_cfg["branch"]
     upstream_branch_name = prep_cfg["upstream_branch"]
-    with mod_path.chdir_ctx():
-        repo = git.Repo()
-        if "upstream" not in repo.remotes:
-            repo.create_remote("upstream", url=prep_cfg["upstream_url"], t=upstream_branch_name)
-        if branch_name not in repo.branches:
-            my_remote_branch = repo.refs["origin/" + branch_name]
-            my_branch = repo.create_head(branch_name, my_remote_branch)
-            my_branch.set_tracking_branch(my_remote_branch)
-        if upstream_branch_name not in repo.branches:
-            upstream_remote_branch = repo.refs["upstream/" + upstream_branch_name]
-            upstream_branch = repo.create_head(upstream_branch_name, upstream_remote_branch)
-            upstream_branch.set_tracking_branch(upstream_remote_branch)
+    repo = git.Repo(mod_path)
+    if "upstream" not in repo.remotes:
+        repo.create_remote("upstream", url=prep_cfg["upstream_url"], t=upstream_branch_name)
+    if branch_name not in repo.branches:
+        my_remote_branch = repo.refs["origin/" + branch_name]
+        my_branch = repo.create_head(branch_name, my_remote_branch)
+        my_branch.set_tracking_branch(my_remote_branch)
+    if upstream_branch_name not in repo.branches:
+        upstream_remote_branch = repo.refs["upstream/" + upstream_branch_name]
+        upstream_branch = repo.create_head(upstream_branch_name, upstream_remote_branch)
+        upstream_branch.set_tracking_branch(upstream_remote_branch)
 
 
 def fetch_repo(repo_dir: Path):
-    with repo_dir.chdir_ctx():
-        repo = git.Repo()
-        for remote in repo.remotes:
-            remote.fetch()
+    repo = git.Repo(repo_dir)
+    for remote in repo.remotes:
+        remote.fetch()
+
+
+def checkout_repo(repo_dir: Path, branch: str):
+    repo = git.Repo(repo_dir)
+    repo.branches[branch].checkout()
 
 
 def push_repo(repo_dir: Path, prep_cfg: Optional[dict] = None):
-    with repo_dir.chdir_ctx():
-        repo = git.Repo()
-        if prep_cfg:
-            branch_name = prep_cfg["branch"]
-            upstream_branch_name = prep_cfg["upstream_branch"]
-        else:
-            branch_name = repo.active_branch.name
-            upstream_branch_name = None
-        print(f"branch: {branch_name} upstream_branch: {upstream_branch_name}")
-        repo.remotes["origin"].push(branch_name)
-        if upstream_branch_name:
-            repo.remotes["origin"].push(upstream_branch_name)
+    repo = git.Repo(repo_dir)
+    if prep_cfg:
+        branch_name = prep_cfg["branch"]
+        upstream_branch_name = prep_cfg["upstream_branch"]
+    else:
+        branch_name = repo.active_branch.name
+        upstream_branch_name = None
+    repo.remotes["origin"].push(branch_name)
+    if upstream_branch_name:
+        repo.remotes["origin"].push(upstream_branch_name)
 
 
 def merge_repo(repo_dir: Path, prep_cfg: Optional[dict] = None) -> bool:
-    with repo_dir.chdir_ctx():
-        repo = git.Repo()
-        if prep_cfg:
-            branch_name = prep_cfg["branch"]
-            upstream_branch_name = prep_cfg["upstream_branch"]
-        else:
-            branch_name = repo.active_branch.name
-            upstream_branch_name = repo.active_branch.remote_name
-        my_branch = repo.branches[branch_name]
-        upstream_branch = repo.branches[upstream_branch_name]
-        my_branch.checkout()
-        try:
-            repo.git.merge("--no-commit", upstream_branch_name)
-        except git.GitCommandError as e:
-            print(e)
-            return False
-        if len(repo.index.unmerged_blobs()):
-            return False
-        repo.index.commit(
-            f"Merge {upstream_branch_name} into {branch_name}",
-            parent_commits=(my_branch.commit, upstream_branch.commit),
-        )
-        return True
+    repo = git.Repo(repo_dir)
+    if prep_cfg:
+        branch_name = prep_cfg["branch"]
+        upstream_branch_name = prep_cfg["upstream_branch"]
+    else:
+        branch_name = repo.active_branch.name
+        upstream_branch_name = repo.active_branch.remote_name
+    my_branch = repo.branches[branch_name]
+    upstream_branch = repo.branches[upstream_branch_name]
+    my_branch.checkout()
+    try:
+        repo.git.merge("--no-commit", upstream_branch_name)
+    except git.GitCommandError as e:
+        print("\n" + e)
+        return False
+    if len(repo.index.unmerged_blobs()):
+        return False
+    repo.index.commit(
+        f"Merge {upstream_branch_name} into {branch_name}",
+        parent_commits=(my_branch.commit, upstream_branch.commit),
+    )
+    return True
 
 
 def real_main(args):
@@ -243,19 +245,28 @@ def real_main(args):
             print(f"\t{needs_merge_dir}")
     elif args.fetch:
         print("Fetching:")
-        for repo_dir in get_unique_submodule_dirs(args.path, args.recursive):
+        for repo_dir in get_unique_repo_dirs(args.path, args.recursive, include_root=True):
             print(f"\t{repo_dir}")
             fetch_repo(repo_dir)
+    elif args.checkout:
+        print("Checking out:")
+        for prep_dir, prep_cfg in prep_cfgs.items():
+            prep_git_dir = prep_dir.removesuffix(prep_cfg["path"])
+            repo = git.Repo(prep_git_dir)
+            submod_dir = prep_cfg["path"].normpath()
+            branch_name = [m.branch_name for m in repo.submodules if m.path == submod_dir][0]
+            print(f"\t{prep_dir}")
+            print(f"\t\t{submod_dir} -> {branch_name}")
     elif args.push:
         print("Pushing:")
-        for repo_dir in get_unique_submodule_dirs(args.path, args.recursive):
+        for repo_dir in get_unique_repo_dirs(args.path, args.recursive, include_root=True):
             print(f"\t{repo_dir}")
             push_repo(repo_dir, prep_cfgs.get(repo_dir, None))
     elif args.merge_upstream:
         print("Merging from upstream:")
         for needs_merge_dir in get_repos_needing_merge(prep_cfgs):
             print(f"\t{needs_merge_dir}", end="")
-            merged = merge_repo(needs_merge_dir, prep_cfg.get(repo_dir, None))
+            merged = merge_repo(needs_merge_dir, prep_cfg.get(needs_merge_dir, None))
             if merged:
                 print(" [merged]")
             else:
@@ -267,6 +278,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
     actions = parser.add_mutually_exclusive_group(required=True)
     actions.add_argument("-f", "--fetch", action="store_true", help="fetch from all remotes")
     actions.add_argument("-p", "--push", action="store_true", help="push all branches to origin")
+    actions.add_argument("-c", "--checkout", action="store_true", help="checkout all preps")
     actions.add_argument(
         "-m", "--merge-upstream", action="store_true", help="merge upstream changes with your own"
     )
