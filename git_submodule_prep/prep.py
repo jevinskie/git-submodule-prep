@@ -136,6 +136,12 @@ def get_repos_needing_merge(prep_cfgs: dict) -> list[Path]:
     return needs_merging
 
 
+def get_default_branch(repo_dir: Path, remote: str) -> str:
+    repo = git.Repo(repo_dir)
+    head = next(filter(lambda r: r.name == f"{remote}/HEAD", repo.refs))
+    return head.ref.name.removeprefix(f"{remote}/")
+
+
 def get_prep_configs(prep_dirs: list[Path]) -> dict[Path, dict[str, str]]:
     cfgs = {}
     for prep_dir in prep_dirs:
@@ -164,6 +170,7 @@ def config_module(mod_path: Path, prep_cfg: dict):
             "upstream", url=prep_cfg["upstream_url"], t=upstream_branch_name
         )
         new_remote.fetch()
+    default_branch = repo.branches[get_default_branch(mod_path, "origin")]
     try:
         current_branch = repo.active_branch
     except TypeError:
@@ -183,6 +190,8 @@ def config_module(mod_path: Path, prep_cfg: dict):
         switch_branch = True
     if switch_branch and current_branch:
         current_branch.checkout()
+    elif switch_branch:
+        default_branch.checkout()
 
 
 def fetch_repo(repo_dir: Path):
